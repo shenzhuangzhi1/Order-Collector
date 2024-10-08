@@ -1,3 +1,5 @@
+create database oxk_data;
+
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 drop table if exists oxk_pepe_spot;
