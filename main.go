@@ -83,7 +83,7 @@ func writeToDatabase(wg *sync.WaitGroup) {
 		select {
 		case msg := <-dataChannel:
 			// Batch write to the database, or single write (choose based on actual situation)
-			_, err := db.Exec("INSERT INTO oxk_pepe_spot (message, timestamp) VALUES ($1, $2)", msg, time.Now())
+			_, err := db.Exec("INSERT INTO oxk_pepe_spot (message) VALUES ($1)", msg)
 			if err != nil {
 				log.Println("Failed to insert data into database:", err)
 			}
