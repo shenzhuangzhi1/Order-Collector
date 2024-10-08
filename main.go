@@ -45,6 +45,24 @@ func handleConnections() {
 	}
 	defer conn.Close()
 
+	// Build subscribe message
+	subscribeMsg := `{
+        "op": "subscribe",
+        "args": [
+            {
+                "channel": "tickers",
+                "instId": "BTC-USDT"
+            }
+        ]
+    }`
+
+	// Send subscribe message
+	err = conn.WriteMessage(websocket.TextMessage, []byte(subscribeMsg))
+	if err != nil {
+		log.Fatalf("Failed to send subscription message: %v", err)
+		return
+	}
+
 	// Continuously receive WebSocket messages
 	for {
 		_, msg, err := conn.ReadMessage()
@@ -65,7 +83,7 @@ func writeToDatabase(wg *sync.WaitGroup) {
 		select {
 		case msg := <-dataChannel:
 			// Batch write to the database, or single write (choose based on actual situation)
-			_, err := db.Exec("INSERT INTO oxk_pepe_spot (message) VALUES ($2)", msg, time.Now())
+			_, err := db.Exec("INSERT INTO oxk_pepe_spot (message, timestamp) VALUES ($1, $2)", msg, time.Now())
 			if err != nil {
 				log.Println("Failed to insert data into database:", err)
 			}
