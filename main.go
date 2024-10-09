@@ -29,6 +29,9 @@ func initDB() {
 	var err error
 	// Get the database IP address from the environment variable DB_HOST, default to 127.0.0.1 if not set
 	host := os.Getenv("DB_HOST")
+	if host == "" {
+		host = "127.0.0.1"
+	}
 
 	// Establish a connection to the PostgreSQL database using the specified host IP
 	db, err = sql.Open("postgres", fmt.Sprintf("host=%s port=5432 user=postgres dbname=oxk_data sslmode=disable password=123456789", host))
