@@ -2,8 +2,10 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"github.com/gorilla/websocket"
 	"log"
+	"os"
 	//"net/http"
 	_ "github.com/lib/pq"
 	"sync"
@@ -25,7 +27,11 @@ var dataChannel = make(chan string, 1000) // Buffered channel to reduce write bl
 // Initialize database connection
 func initDB() {
 	var err error
-	db, err = sql.Open("postgres", "user=postgres dbname=oxk_data sslmode=disable password=123456789")
+	// Get the database IP address from the environment variable DB_HOST, default to 127.0.0.1 if not set
+	host := os.Getenv("DB_HOST")
+
+	// Establish a connection to the PostgreSQL database using the specified host IP
+	db, err = sql.Open("postgres", fmt.Sprintf("host=%s port=5432 user=postgres dbname=oxk_data sslmode=disable password=123456789", host))
 	if err != nil {
 		log.Fatal("Failed to connect to the database:", err)
 	}
