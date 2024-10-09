@@ -16,8 +16,8 @@ COPY . .
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 
-# Use lightweight alpine image
-FROM alpine:latest  
+# Use lightweight alpine image for the final container
+FROM alpine:latest
 
 # Set the working directory
 WORKDIR /root/
@@ -25,8 +25,11 @@ WORKDIR /root/
 # Copy the compiled binary from the builder stage
 COPY --from=builder /app/main .
 
-# Expose application port (modify according to actual situation)
+# Expose the application port (modify according to your actual needs)
 EXPOSE 8080
+
+# Set environment variable for the database host, defaulting to 127.0.0.1 if not provided
+ENV DB_HOST=127.0.0.1
 
 # Run the application
 CMD ["./main"]
