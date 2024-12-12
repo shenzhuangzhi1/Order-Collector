@@ -30,6 +30,7 @@ EXPOSE 8080
 
 # Set environment variable for the database host, defaulting to 127.0.0.1 if not provided
 ENV DB_HOST=127.0.0.1
+ENV DB_PASSWORD=123456789
 
 # Run the application
 CMD ["./main"]

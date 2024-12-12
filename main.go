@@ -1,126 +1,144 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"log"
 	"os"
-	//"net/http"
-	_ "github.com/lib/pq"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
+
+	_ "github.com/lib/pq"
 )
 
-// Upgrade HTTP connection to WebSocket connection
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
+var (
+	db          *sql.DB
+	dataChannel = make(chan string, 1000) // Buffered channel
+)
 
-// Database connection pool
-var db *sql.DB
-
-// Data write channel
-var dataChannel = make(chan string, 1000) // Buffered channel to reduce write blocking
-
-// Initialize database connection
 func initDB() {
 	var err error
-	// Get the database IP address from the environment variable DB_HOST, default to 127.0.0.1 if not set
 	host := os.Getenv("DB_HOST")
 	if host == "" {
 		host = "127.0.0.1"
 	}
 
-	// Establish a connection to the PostgreSQL database using the specified host IP
-	db, err = sql.Open("postgres", fmt.Sprintf("host=%s port=5432 user=postgres dbname=oxk_data sslmode=disable password=123456789", host))
+	password := os.Getenv("DB_PASSWORD")
+	if password == "" {
+		password = "123456789"
+	}
+
+	db, err = sql.Open("postgres", fmt.Sprintf("host=%s port=5432 user=postgres dbname=postgres sslmode=disable password=%s", host, password))
 	if err != nil {
 		log.Fatal("Failed to connect to the database:", err)
 	}
-	// Set maximum connection numbers
 	db.SetMaxOpenConns(50)
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(time.Hour)
 }
 
-// WebSocket connection handling
-func handleConnections() {
-	// Connect to OKX WebSocket server
-	conn, _, err := websocket.DefaultDialer.Dial("wss://ws.okx.com:8443/ws/v5/public", nil)
-	if err != nil {
-		log.Println("Failed to connect to WebSocket:", err)
-		return
-	}
-	defer conn.Close()
+func handleConnections(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
 
-	// Build subscribe message
-	subscribeMsg := `{
-        "op": "subscribe",
-        "args": [
-            {
-                "channel": "tickers",
-                "instId": "BTC-USDT"
-            }
-        ]
-    }`
-
-	// Send subscribe message
-	err = conn.WriteMessage(websocket.TextMessage, []byte(subscribeMsg))
-	if err != nil {
-		log.Fatalf("Failed to send subscription message: %v", err)
-		return
-	}
-
-	// Continuously receive WebSocket messages
 	for {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			log.Println("Error reading WebSocket message:", err)
-			break
+		select {
+		case <-ctx.Done():
+			log.Println("WebSocket connection handler exiting...")
+			return
+		default:
 		}
 
-		// Send message to channel
-		dataChannel <- string(msg)
+		// Connect to WebSocket
+		conn, _, err := websocket.DefaultDialer.Dial("wss://ws.okx.com:8443/ws/v5/public", nil)
+		if err != nil {
+			log.Println("WebSocket connection failed, retrying:", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		log.Println("WebSocket connected")
+		subscribeMsg := `{
+			"op": "subscribe",
+			"args": [
+				{
+					"channel": "tickers",
+					"instId": "BTC-USDT"
+				}
+			]
+		}`
+		err = conn.WriteMessage(websocket.TextMessage, []byte(subscribeMsg))
+		if err != nil {
+			log.Println("Failed to send subscription message:", err)
+			conn.Close()
+			continue
+		}
+
+		// Listen for messages
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				log.Println("WebSocket disconnected:", err)
+				conn.Close()
+				break
+			}
+			select {
+			case dataChannel <- string(msg):
+			case <-ctx.Done():
+				conn.Close()
+				return
+			}
+		}
 	}
 }
 
-// Write data to the database
-func writeToDatabase(wg *sync.WaitGroup) {
+func writeToDatabase(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
+
 	for {
 		select {
+		case <-ctx.Done():
+			log.Println("Database writer exiting...")
+			return
 		case msg := <-dataChannel:
-			// Batch write to the database, or single write (choose based on actual situation)
 			_, err := db.Exec("INSERT INTO oxk_pepe_spot (message) VALUES ($1)", msg)
 			if err != nil {
-				log.Println("Failed to insert data into database:", err)
+				log.Println("Failed to write to database:", err)
 			}
 		}
 	}
 }
 
 func main() {
-	// Initialize database
 	initDB()
 	defer db.Close()
 
-	// Create wait group
 	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
 
-	// Start WebSocket connection handling
-	go handleConnections()
+	// Handle system signals for graceful shutdown
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-signalChan
+		log.Println("Shutting down...")
+		cancel()
+	}()
 
-	// Start multiple goroutines for database writing
+	// Start WebSocket handler
+	wg.Add(1)
+	go handleConnections(ctx, &wg)
+
+	// Start database writers
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
-		go writeToDatabase(&wg)
+		go writeToDatabase(ctx, &wg)
 	}
 
-	// Start HTTP server (if needed)
 	log.Println("Server has started")
-	select {} // Keep main goroutine running
-
-	// Wait for all database goroutines to complete
 	wg.Wait()
+	log.Println("Server stopped")
 }
